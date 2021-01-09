@@ -10,8 +10,8 @@
 #include <sys/select.h>
 #include <termios.h>
 
-#define x_dim 80
-#define y_dim 25
+#define X_DIM 80
+#define Y_DIM 25
 
 enum pacman_keycode {
     NONE,
@@ -19,18 +19,14 @@ enum pacman_keycode {
     KEY_LEFT,
     KEY_RIGHT,
     KEY_DOWN,
-    KEY_p
+    KEY_q
 };
 
 enum move_direction {
     UP,
-    UP_RIGHT,
     RIGHT,
-    DOWN_RIGHT,
     DOWN,
-    DOWN_LEFT,
     LEFT,
-    UP_LEFT
 };
 
 typedef struct game_object {
@@ -49,15 +45,22 @@ struct termios orig_termios;
 const int x_field_min = 16;
 const int x_field_max = 46;
 
-enum pacman_keycode pressed_key;
+// matrix for the game object to place on
+char screen_memory[X_DIM][Y_DIM];
 
-char screen_memory[x_dim][y_dim];
-char obstacles[x_dim][y_dim];
-char eat_pellets[x_dim][y_dim];
+// matrix for the obstacles (walls) to place on
+char obstacles[X_DIM][Y_DIM];
+
+// matrix for the points which can be eaten by pacman
+char eat_pellets[X_DIM][Y_DIM];
+
+// 1 if screen_memory was updated in last cycle
 int screen_updated;
-int key_pressed;
+
+// variable for game points
 int game_points=0;
 
+// function prototypes
 void print_screen_memory_to_cli();
 void clear_screen_memory(char empty_char);
 void make_dot(int x, int y, char dot_char);
@@ -101,12 +104,11 @@ int main(void) {
     init_eat_pellets();
 
     clear_screen_memory(' ');
+    make_dot(ghost.x, ghost.y, 'A');
     make_dot(pacman.x, pacman.y, 'O');
     print_screen_memory_to_cli();
 
-    // printf("please press P key to pause \n ");
-
-    pressed_key = NONE;
+    enum pacman_keycode pressed_key = NONE;
 
     while (1)
     {
@@ -126,7 +128,7 @@ int main(void) {
         else if (pressed_key == KEY_RIGHT) { // cursor key RIGHT
             pacman = move_game_object(RIGHT, 1, pacman);
         }
-        else if (pressed_key == KEY_p) {
+        else if (pressed_key == KEY_q) {
             // leave the while loop and therewith terminate the program
             break;
         }
@@ -144,7 +146,7 @@ int main(void) {
             make_dot(ghost.x, ghost.y, 'A');
             print_screen_memory_to_cli();
             printf("\n.. %i\n", game_points);
-            // printf(".. ghost.x=%i; ghost.y=%i\n", ghost.x, ghost.y); // for debugging
+
             // initialize for taking new key events or ghost update
             pressed_key= NONE;
             ghost.updated = false;
@@ -157,8 +159,8 @@ void print_screen_memory_to_cli() {
     // system("cls"); // use this in windows
     printf("\e[1;1H\e[2J"); // for linux use the regex
 
-    for (int y_i = 0; y_i < y_dim; y_i++) {
-        for (int x_i = 0; x_i < x_dim; x_i++) {
+    for (int y_i = 0; y_i < Y_DIM; y_i++) {
+        for (int x_i = 0; x_i < X_DIM; x_i++) {
             if (obstacles[x_i][y_i] == 1) {
                 printf("#");
             }
@@ -188,8 +190,8 @@ void make_dot(int x, int y, char dot_char) {
 }
 
 void clear_screen_memory(char empty_char) {
-    for (int y_i = 0; y_i < y_dim; y_i++) {
-        for (int x_i = 0; x_i < x_dim; x_i++) {
+    for (int y_i = 0; y_i < Y_DIM; y_i++) {
+        for (int x_i = 0; x_i < X_DIM; x_i++) {
             screen_memory[x_i][y_i] = empty_char;
         }
     }
@@ -225,7 +227,7 @@ enum pacman_keycode get_pressed_key() {
 
         }
         else if (key == 'q') {
-            return KEY_p;
+            return KEY_q;
         }
     }
     return NONE;
@@ -236,14 +238,16 @@ game_object_t move_game_object(enum move_direction direction, int eat_pellets, g
     switch (direction) {
     case UP:
         y_new = (game_object.y - 1);
-        if (y_new == -1) y_new = y_dim - 1;
+        if (y_new == -1) y_new = Y_DIM - 1;
         if (!collision_with_obstacle(game_object.x, y_new)) {
             game_object.y = y_new;
         }
         break;
     case RIGHT:
-        x_new = (game_object.x + 1) % x_dim;
+        x_new = (game_object.x + 1) % X_DIM;
         if (!collision_with_obstacle(x_new, game_object.y)) {
+            // handle the special case that player leaves through
+            // the tunnel at the right side
             if (x_new > x_field_max) {
                 game_object.x = x_field_min;
             }
@@ -253,15 +257,17 @@ game_object_t move_game_object(enum move_direction direction, int eat_pellets, g
         }
         break;
     case DOWN:
-        y_new = (game_object.y + 1) % y_dim;
+        y_new = (game_object.y + 1) % Y_DIM;
         if (!collision_with_obstacle(game_object.x, y_new)) {
             game_object.y = y_new;
         }
         break;
     case LEFT:
         x_new = (game_object.x - 1);
-        if (game_object.x == -1) x_new = x_dim - 1;
+        if (game_object.x == -1) x_new = X_DIM - 1;
         if (!collision_with_obstacle(x_new, game_object.y)) {
+            // handle the special case that player leaves through
+            // the tunnel at the left side
             if (x_new < x_field_min) {
                 game_object.x = x_field_max;
             }
@@ -321,8 +327,8 @@ void collect_eat_pellets(int x, int y) {
 void init_obstacles() {
     FILE* fp = fopen("obstacles.txt", "r");
     char c;
-    for (int row = 0; row < y_dim; row++) {
-        for (int col = 0; col < x_dim; col++) {
+    for (int row = 0; row < Y_DIM; row++) {
+        for (int col = 0; col < X_DIM; col++) {
             c = fgetc(fp);
             if (c != EOF) {
                 if (c == '#') {
@@ -333,7 +339,6 @@ void init_obstacles() {
                 }
             }
         }
-        // fgetc(fp); // get the CR out of the file, in linux also CR as one of two line ending chars
         c=fgetc(fp); // get the LF out of the file, in windows only this one line ending in text mode
     }
     fclose(fp);
@@ -343,8 +348,8 @@ void init_eat_pellets() {
 
     FILE* fp = fopen("eat_pellets.txt", "r");
     char c;
-    for (int row = 0; row < y_dim; row++) {
-        for (int col = 0; col < x_dim; col++) {
+    for (int row = 0; row < Y_DIM; row++) {
+        for (int col = 0; col < X_DIM; col++) {
             c = fgetc(fp);
             if (c != EOF) {
                 if (c == '1') {
@@ -421,14 +426,3 @@ long getMillis_sinceMidnight() {
     return time_ms;
 }
 
-
-// Programm ausführen: STRG+F5 oder "Debuggen" > Menü "Ohne Debuggen starten"
-// Programm debuggen: F5 oder "Debuggen" > Menü "Debuggen starten"
-
-// Tipps für den Einstieg: 
-//   1. Verwenden Sie das Projektmappen-Explorer-Fenster zum Hinzufügen/Verwalten von Dateien.
-//   2. Verwenden Sie das Team Explorer-Fenster zum Herstellen einer Verbindung mit der Quellcodeverwaltung.
-//   3. Verwenden Sie das Ausgabefenster, um die Buildausgabe und andere Nachrichten anzuzeigen.
-//   4. Verwenden Sie das Fenster "Fehlerliste", um Fehler anzuzeigen.
-//   5. Wechseln Sie zu "Projekt" > "Neues Element hinzufügen", um neue Codedateien zu erstellen, bzw. zu "Projekt" > "Vorhandenes Element hinzufügen", um dem Projekt vorhandene Codedateien hinzuzufügen.
-//   6. Um dieses Projekt später erneut zu öffnen, wechseln Sie zu "Datei" > "Öffnen" > "Projekt", und wählen Sie die SLN-Datei aus.
